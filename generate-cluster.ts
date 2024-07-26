@@ -108,8 +108,6 @@ const main = async () => {
     }
 };
 
-<<<<<<< HEAD
 main();
-=======
-main();
->>>>>>> f63ffe766ad61d05c7bf734fccdb74bbea405e79
+
+
