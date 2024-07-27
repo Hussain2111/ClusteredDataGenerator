@@ -1,2 +1,26 @@
-# Data-Structure-Ingestion-and-Exploratory-Data-Analysis
-This project focuses on generating data from a structured data source stored in Excel or JSON files, ingesting the data, and performing Exploratory Data Analysis (EDA). The code includes functionalities for reading and processing data, transforming it into a usable format, and conducting comprehensive data analysis.
+# ClusteredDataGenerator
+
+This TypeScript program generates data based on a provided JSON structure and ingests it into an Excel file using the Faker library. It is designed to handle dynamic changes to the data structure and efficiently generate large volumes of records by leveraging Node.js's clustering capabilities.
+
+## Features
+
+- **Dynamic Column Handling:** The program adjusts to added or removed columns in the `input.json` file.
+- **Duplicate Order Number Handling:** Ensures uniqueness of order numbers.
+- **String Length Handling:** Generates strings of specified lengths for 'String' data types.
+- **User-Specified Record Count:** Allows the user to specify the number of records to generate.
+- **Performance Optimization:** Utilizes Node.js clustering to enhance performance for large data sets.
+
+## Requirements
+
+- Node.js v20.14
+- TypeScript
+- Faker library
+- ExcelJS library
+- `cluster` module
+
+## Licence 
+
+This project is licensed under the MIT License - see the LICENSE.md file for details.
+
+
+  
