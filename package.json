@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "generate": "npm run build && node dist/generate-cluster.js",
+    "generate": "npm run build && node dist/generate.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
