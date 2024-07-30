@@ -1,8 +1,12 @@
 import { faker } from '@faker-js/faker';
-import * as fs from 'fs/promises';
-import * as xlsx from 'xlsx';
-import * as readline from 'readline';
+import * as fs from 'fs';
+import cluster from 'cluster';
+import os from 'os';
+import { performance } from 'perf_hooks'; // Import performance module
+import path from 'path';
 
+const startTime = performance.now();
+// Define the structure of each column in the JSON configuration
 type ColumnInfo = {
     DataType: string;
     Format?: string;
@@ -13,8 +17,14 @@ type ColumnInfo = {
     IsInteger: string;
 };
 
+// Define the overall structure of the JSON configuration
 type JsonStructure = ColumnInfo[];
 
+/**
+ * Checks for duplicate order numbers in the JSON structure
+ * @param structure The JSON structure to check
+ * @throws Error if a duplicate order number is found
+ */
 const checkDuplicateOrders = (structure: JsonStructure): void => {
     const orderNumbers = new Set<string>();
     structure.forEach(column => {
@@ -23,9 +33,13 @@ const checkDuplicateOrders = (structure: JsonStructure): void => {
         }
         orderNumbers.add(column.Order);
     });
-    console.log('Duplicate order check passed.');
 };
 
+/**
+ * Generates a random value based on the column configuration
+ * @param column The column configuration
+ * @returns A random value of the appropriate type
+ */
 const generateRandomValue = (column: ColumnInfo): any => {
     switch (column.DataType) {
         case 'String':
@@ -44,58 +58,153 @@ const generateRandomValue = (column: ColumnInfo): any => {
     }
 };
 
-const createPersonObject = (structure: JsonStructure): Record<string, any> =>
-    structure.reduce((person, column) => {
-        person[column.ExcelColumnName] = generateRandomValue(column);
-        return person;
-    }, {} as Record<string, any>);
-
-const saveToExcel = (data: any[], filePath: string) => {
-    const workbook = xlsx.utils.book_new();
-    const worksheet = xlsx.utils.json_to_sheet(data);
-    xlsx.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
-    xlsx.writeFile(workbook, filePath);
+const createPersonObject = (structure: JsonStructure): string => {
+    return structure.map(column => {
+        const value = generateRandomValue(column);
+        return typeof value === 'string' && value.includes(',') ? `"${value}"` : value;
+    }).join(',');
 };
 
-const generateData = (jsonStructure: JsonStructure, recordsToGenerate: number) =>
-    Array.from({ length: recordsToGenerate }, (_, index) => {
-        if (index % 1000 === 0) console.log(`Generating record ${index + 1} of ${recordsToGenerate}`);
-        return createPersonObject(jsonStructure);
+const writeCSVInBatches = (structure: JsonStructure, recordsToGenerate: number, filePath: string, batchSize: number = 50000) => {
+    return new Promise<void>((resolve, reject) => {
+        const writeStream = fs.createWriteStream(filePath, { highWaterMark: 64 * 1024 });
+        const headers = structure.map(col => col.ExcelColumnName).join(',') + '\n';
+        writeStream.write(headers);
+
+        let recordsWritten = 0;
+
+        const writeBatch = () => {
+            let batch = '';
+            const batchEnd = Math.min(recordsWritten + batchSize, recordsToGenerate);
+
+            for (; recordsWritten < batchEnd; recordsWritten++) {
+                batch += createPersonObject(structure) + '\n';
+            }
+
+            if (!writeStream.write(batch)) {
+                writeStream.once('drain', () => {
+                    if (recordsWritten < recordsToGenerate) {
+                        setImmediate(writeBatch);
+                    } else {
+                        writeStream.end(() => resolve());
+                    }
+                });
+            } else if (recordsWritten < recordsToGenerate) {
+                setImmediate(writeBatch);
+            } else {
+                writeStream.end(() => resolve());
+            }
+        };
+
+        writeBatch();
+
+        writeStream.on('error', reject);
     });
+};
 
-const main = async () => {
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
 
-    rl.question('How many records do you want to generate? ', async (answer) => {
-        const numRecords = parseInt(answer);
-        if (isNaN(numRecords) || numRecords <= 0) {
-            console.log('Please enter a valid positive number.');
-            rl.close();
-            process.exit(1);
-        }
 
-        console.log(`Generating ${numRecords} records...`);
+if (cluster.isPrimary) {
+    const numCPUs = os.cpus().length;
+    const numRecords = parseInt(process.argv[2]) || 1000;
+    const recordsPerWorker = Math.ceil(numRecords / numCPUs);
 
-        try {
-            const data = await fs.readFile('input.json', 'utf8');
+    console.log(`Generating ${numRecords} records using ${numCPUs} workers`);
+
+    fs.promises.readFile('input.json', 'utf8')
+        .then(data => {
             const jsonStructure: ColumnInfo[] = JSON.parse(data);
             checkDuplicateOrders(jsonStructure);
             jsonStructure.sort((a, b) => parseInt(a.Order) - parseInt(b.Order));
 
-            const persons = generateData(jsonStructure, numRecords);
-            saveToExcel(persons, 'output.xlsx');
+            let completedWorkers = 0;
 
-            console.log(`${numRecords} records generated and saved to output.xlsx`);
-        } catch (error) {
+            for (let i = 0; i < numCPUs; i++) {
+                const worker = cluster.fork();
+                worker.send({ jsonStructure, recordsToGenerate: recordsPerWorker, workerId: i });
+
+                worker.on('message', (message: { completed: boolean }) => {
+                    if (message.completed && ++completedWorkers === numCPUs) {
+                        console.log('All workers completed. Merging files...');
+                        mergeFiles(numCPUs)
+                            .then(() => {
+                                const endTime = performance.now();
+                                console.log(`Total execution time: ${(endTime - startTime).toFixed(2)} milliseconds`);
+                                process.exit(0);
+                            })
+                            .catch(error => {
+                                console.error("Error merging files:", error);
+                                process.exit(1);
+                            });
+                    }
+                });
+            }
+
+            cluster.on('exit', (worker) => {
+                console.log(`Worker ${worker.process.pid} died`);
+            });
+        })
+        .catch(error => {
             console.error("Error processing data:", error);
-        } finally {
-            rl.close();
-            process.exit(0);
-        }
+        });
+} else {
+    process.on('message', (message: { jsonStructure: JsonStructure, recordsToGenerate: number, workerId: number }) => {
+        const { jsonStructure, recordsToGenerate, workerId } = message;
+        const workerFilePath = path.join(__dirname, `output_part_${workerId}.csv`);
+        
+        writeCSVInBatches(jsonStructure, recordsToGenerate, workerFilePath)
+            .then(() => {
+                if (process.send) {
+                    process.send({ completed: true });
+                }
+            })
+            .catch(error => {
+                console.error(`Worker ${workerId} error:`, error);
+                process.exit(1);
+            });
     });
-};
+}
 
-main();
+function mergeFiles(numFiles: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const outputStream = fs.createWriteStream('output.csv', { highWaterMark: 64 * 1024 });
+        let currentFile = 0;
+
+        const appendNextFile = () => {
+            if (currentFile >= numFiles) {
+                outputStream.end();
+                return;
+            }
+
+            const filePath = path.join(__dirname, `output_part_${currentFile}.csv`);
+            const readStream = fs.createReadStream(filePath, { highWaterMark: 64 * 1024 });
+
+            readStream.pipe(outputStream, { end: false });
+
+            readStream.on('end', () => {
+                fs.unlink(filePath, (err) => {
+                    if (err) console.error(`Error deleting file ${filePath}:`, err);
+                });
+                currentFile++;
+                appendNextFile();
+            });
+
+            readStream.on('error', (error) => {
+                console.error(`Error reading file ${filePath}:`, error);
+                reject(error);
+            });
+        };
+
+        outputStream.on('finish', () => {
+            console.log('All files have been merged successfully');
+            resolve();
+        });
+
+        outputStream.on('error', (error) => {
+            console.error('Error writing to output file:', error);
+            reject(error);
+        });
+
+        appendNextFile();
+    });
+}
