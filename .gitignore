@@ -56,7 +56,7 @@ build/
 .env
 
 # Ignore generated files
-*.csv
+
 
 # Excel files (if you want to ignore them)
 *.xlsx
@@ -65,7 +65,7 @@ build/
 .gitignore
 
 #
-package-lock.json
+
 
 #
-input.json
+
