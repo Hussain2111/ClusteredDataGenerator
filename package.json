@@ -15,8 +15,7 @@
   "license": "ISC",
   "dependencies": {
     "@faker-js/faker": "^8.4.1",
-    "exceljs": "^4.4.0",
-    "xlsx": "^0.18.0"
+    "csv-writer": "^3.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
