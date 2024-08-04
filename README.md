@@ -15,12 +15,5 @@ This TypeScript program generates data based on a provided JSON structure and in
 - Node.js v20.14
 - TypeScript
 - Faker library
-- ExcelJS library
+- `csv-Writer` library
 - `cluster` module
-
-## Licence 
-
-This project is licensed under the MIT License - see the LICENSE.md file for details.
-
-
-  
